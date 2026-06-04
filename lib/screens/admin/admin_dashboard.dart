@@ -145,130 +145,269 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
     final notesCtrl = TextEditingController();
     final selectedPilotIds = <String>{};
 
+    // Eligibility helpers
+    bool isQualified(UserProfile p) =>
+        selectedAircraftId == null ||
+        p.aircraftQualificationIds.contains(selectedAircraftId);
+
+    bool isCurrent(UserProfile p) {
+      final s = fitnessStatus(p.fitnessExpiry);
+      return s == PilotStatus.go || s == PilotStatus.warning;
+    }
+
+    bool isEligible(UserProfile p) => isQualified(p) && isCurrent(p);
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => _HudDialog(
-          title: 'INSERISCI VOLO',
-          action: FilledButton(
-            onPressed: selectedPilotIds.isEmpty || selectedAircraftId == null
-                ? null
-                : () async {
-                    Navigator.of(ctx).pop();
-                    await _flightService.insertFlight(
-                      date: date,
-                      aircraftTypeId: selectedAircraftId!,
-                      pilotIds: selectedPilotIds.toList(),
-                      durationMinutes: int.tryParse(durationCtrl.text),
-                      notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
-                      insertedByUserId: auth.currentUser!.id,
-                    );
-                    _load();
-                  },
-            style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
-            child: const Text('SALVA', style: TextStyle(color: kCyan, letterSpacing: 2)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _HudTile(
-                label: 'DATA',
-                value: DateFormat('dd/MM/yyyy').format(date),
-                icon: Icons.calendar_today,
-                onTap: () async {
-                  final d = await showDatePicker(
-                    context: ctx,
-                    initialDate: date,
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime(2030),
-                    builder: (ctx, child) => Theme(
-                      data: ThemeData.dark().copyWith(
-                        colorScheme: const ColorScheme.dark(primary: kCyan),
+        builder: (ctx, set) {
+          // Remove any selected pilots who became ineligible after aircraft change
+          selectedPilotIds.removeWhere((id) {
+            final p = _pilots.firstWhere((x) => x.id == id, orElse: () => _pilots.first);
+            return !isEligible(p);
+          });
+
+          final eligiblePilots   = _pilots.where(isEligible).toList();
+          final ineligiblePilots = _pilots.where((p) => !isEligible(p)).toList();
+
+          return _HudDialog(
+            title: 'INSERISCI VOLO',
+            action: FilledButton(
+              onPressed: selectedPilotIds.isEmpty || selectedAircraftId == null
+                  ? null
+                  : () async {
+                      Navigator.of(ctx).pop();
+                      await _flightService.insertFlight(
+                        date: date,
+                        aircraftTypeId: selectedAircraftId!,
+                        pilotIds: selectedPilotIds.toList(),
+                        durationMinutes: int.tryParse(durationCtrl.text),
+                        notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
+                        insertedByUserId: auth.currentUser!.id,
+                      );
+                      _load();
+                    },
+              style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+              child: const Text('SALVA', style: TextStyle(color: kCyan, letterSpacing: 2)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _HudTile(
+                  label: 'DATA',
+                  value: DateFormat('dd/MM/yyyy').format(date),
+                  icon: Icons.calendar_today,
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: ctx,
+                      initialDate: date,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                      builder: (ctx, child) => Theme(
+                        data: ThemeData.dark().copyWith(
+                          colorScheme: const ColorScheme.dark(primary: kCyan),
+                        ),
+                        child: child!,
                       ),
-                      child: child!,
-                    ),
-                  );
-                  if (d != null) set(() => date = d);
-                },
-              ),
-              const SizedBox(height: 12),
-              _hudDropdown<int>(
-                label: 'AEROMOBILE',
-                value: selectedAircraftId,
-                items: aircraftTypes
-                    .map((a) => DropdownMenuItem(value: a.id, child: Text(a.code)))
-                    .toList(),
-                onChanged: (v) => set(() => selectedAircraftId = v),
-              ),
-              const SizedBox(height: 12),
-              _hudTextField(durationCtrl, 'DURATA (MIN)', TextInputType.number),
-              const SizedBox(height: 12),
-              _hudTextField(notesCtrl, 'NOTE', TextInputType.text),
-              const SizedBox(height: 16),
-              const Text('PILOTI', style: TextStyle(color: kCyan, letterSpacing: 2, fontSize: 11)),
-              const SizedBox(height: 8),
-              ..._pilots.map(
-                (p) => CheckboxListTile(
-                  dense: true,
-                  title: Text(p.fullName, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                  value: selectedPilotIds.contains(p.id),
-                  activeColor: kCyan,
-                  checkColor: kBg,
+                    );
+                    if (d != null) set(() => date = d);
+                  },
+                ),
+                const SizedBox(height: 12),
+                _hudDropdown<int>(
+                  label: 'AEROMOBILE',
+                  value: selectedAircraftId,
+                  items: aircraftTypes
+                      .map((a) => DropdownMenuItem(value: a.id, child: Text(a.code)))
+                      .toList(),
                   onChanged: (v) => set(() {
-                    if (v == true) selectedPilotIds.add(p.id);
-                    else selectedPilotIds.remove(p.id);
+                    selectedAircraftId = v;
+                    // deselect pilots no longer eligible
+                    selectedPilotIds.removeWhere((id) {
+                      final p = _pilots.firstWhere((x) => x.id == id,
+                          orElse: () => _pilots.first);
+                      return !isEligible(p);
+                    });
                   }),
                 ),
-              ),
-            ],
-          ),
-        ),
+                const SizedBox(height: 12),
+                _hudTextField(durationCtrl, 'DURATA (MIN)', TextInputType.number),
+                const SizedBox(height: 12),
+                _hudTextField(notesCtrl, 'NOTE', TextInputType.text),
+                const SizedBox(height: 16),
+
+                // ── Piloti idonei ──
+                Row(children: [
+                  Container(width: 3, height: 12, color: kGo),
+                  const SizedBox(width: 6),
+                  Text(
+                    'PILOTI IDONEI (${eligiblePilots.length})',
+                    style: TextStyle(color: kGo, letterSpacing: 2, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                if (eligiblePilots.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Nessun pilota abilitato e current su questo aeromobile.',
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                  )
+                else
+                  ...eligiblePilots.map((p) {
+                    final status = fitnessStatus(p.fitnessExpiry);
+                    final color  = statusColor(status);
+                    return CheckboxListTile(
+                      dense: true,
+                      title: Row(children: [
+                        Text(
+                          p.callsign != null ? p.callsign! : p.fullName,
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        if (p.callsign != null) ...[
+                          const SizedBox(width: 6),
+                          Text(p.fullName, style: TextStyle(color: Colors.white38, fontSize: 11)),
+                        ],
+                      ]),
+                      subtitle: Row(children: [
+                        MiniStatusDot(status: status),
+                        const SizedBox(width: 6),
+                        Text(
+                          statusLabel(status),
+                          style: TextStyle(color: color, fontSize: 10, letterSpacing: 1),
+                        ),
+                      ]),
+                      value: selectedPilotIds.contains(p.id),
+                      activeColor: kCyan,
+                      checkColor: kBg,
+                      onChanged: (v) => set(() {
+                        if (v == true) selectedPilotIds.add(p.id);
+                        else selectedPilotIds.remove(p.id);
+                      }),
+                    );
+                  }),
+
+                // ── Piloti non idonei ──
+                if (ineligiblePilots.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Container(width: 3, height: 12, color: Colors.white24),
+                    const SizedBox(width: 6),
+                    Text(
+                      'NON IDONEI (${ineligiblePilots.length})',
+                      style: const TextStyle(color: Colors.white38, letterSpacing: 2, fontSize: 11),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  ...ineligiblePilots.map((p) {
+                    final qualified = isQualified(p);
+                    final current   = isCurrent(p);
+                    return Opacity(
+                      opacity: 0.45,
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.block, color: Colors.white38, size: 18),
+                        title: Text(
+                          p.callsign != null ? p.callsign! : p.fullName,
+                          style: const TextStyle(color: Colors.white54, fontSize: 13),
+                        ),
+                        trailing: Wrap(spacing: 4, children: [
+                          if (!qualified)
+                            _MicroBadge('NON ABILITATO', kNoGo),
+                          if (!current)
+                            _MicroBadge('NON CURRENT', kWarning),
+                        ]),
+                      ),
+                    );
+                  }),
+                ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _addPilot() async {
-    final nomeCtrl = TextEditingController();
-    final cogCtrl = TextEditingController();
-    final usrCtrl = TextEditingController();
-    final pwdCtrl = TextEditingController();
-    final mailCtrl = TextEditingController();
+    final auth = ref.read(authProvider);
+    final aircraftTypes = auth.aircraftTypes;
+    final nomeCtrl     = TextEditingController();
+    final cogCtrl      = TextEditingController();
+    final callsignCtrl = TextEditingController();
+    final usrCtrl      = TextEditingController();
+    final pwdCtrl      = TextEditingController();
+    final mailCtrl     = TextEditingController();
+    final selectedAc   = <int>{};
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => _HudDialog(
-        title: 'NUOVO PILOTA',
-        action: FilledButton(
-          onPressed: () async {
-            if (nomeCtrl.text.isEmpty || cogCtrl.text.isEmpty ||
-                usrCtrl.text.isEmpty || pwdCtrl.text.isEmpty) return;
-            Navigator.of(ctx).pop();
-            await _userService.createUser(
-              nome: nomeCtrl.text.trim(),
-              cognome: cogCtrl.text.trim(),
-              username: usrCtrl.text.trim(),
-              password: pwdCtrl.text,
-              email: mailCtrl.text.isEmpty ? null : mailCtrl.text.trim(),
-            );
-            _load();
-          },
-          style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
-          child: const Text('CREA', style: TextStyle(color: kCyan, letterSpacing: 2)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _hudTextField(cogCtrl, 'COGNOME *', TextInputType.text),
-            const SizedBox(height: 12),
-            _hudTextField(nomeCtrl, 'NOME *', TextInputType.text),
-            const SizedBox(height: 12),
-            _hudTextField(usrCtrl, 'USERNAME *', TextInputType.text),
-            const SizedBox(height: 12),
-            _hudTextField(pwdCtrl, 'PASSWORD *', TextInputType.visiblePassword),
-            const SizedBox(height: 12),
-            _hudTextField(mailCtrl, 'EMAIL', TextInputType.emailAddress),
-          ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => _HudDialog(
+          title: 'NUOVO PILOTA',
+          action: FilledButton(
+            onPressed: () async {
+              if (cogCtrl.text.isEmpty || nomeCtrl.text.isEmpty ||
+                  usrCtrl.text.isEmpty || pwdCtrl.text.isEmpty) return;
+              Navigator.of(ctx).pop();
+              await _userService.createUser(
+                nome: nomeCtrl.text.trim(),
+                cognome: cogCtrl.text.trim(),
+                callsign: callsignCtrl.text.trim().isEmpty ? null : callsignCtrl.text.trim(),
+                username: usrCtrl.text.trim(),
+                password: pwdCtrl.text,
+                email: mailCtrl.text.isEmpty ? null : mailCtrl.text.trim(),
+                aircraftQualificationIds: selectedAc.toList(),
+              );
+              _load();
+            },
+            style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+            child: const Text('CREA', style: TextStyle(color: kCyan, letterSpacing: 2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _hudTextField(cogCtrl, 'COGNOME *', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(nomeCtrl, 'NOME *', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(callsignCtrl, 'CALLSIGN', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(usrCtrl, 'USERNAME *', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(pwdCtrl, 'PASSWORD *', TextInputType.visiblePassword),
+              const SizedBox(height: 12),
+              _hudTextField(mailCtrl, 'EMAIL', TextInputType.emailAddress),
+              const SizedBox(height: 16),
+              Row(children: [
+                Container(width: 3, height: 12, color: kCyan),
+                const SizedBox(width: 6),
+                Text(
+                  'AEROMOBILI ABILITATO',
+                  style: TextStyle(color: kCyan, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              ...aircraftTypes.map((a) => CheckboxListTile(
+                dense: true,
+                title: Row(children: [
+                  Text(a.code, style: const TextStyle(color: kCyan, fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(a.name, style: const TextStyle(color: Colors.white38, fontSize: 11), overflow: TextOverflow.ellipsis)),
+                ]),
+                value: selectedAc.contains(a.id),
+                activeColor: kCyan,
+                checkColor: kBg,
+                onChanged: (v) => set(() {
+                  if (v == true) selectedAc.add(a.id);
+                  else selectedAc.remove(a.id);
+                }),
+              )),
+            ],
+          ),
         ),
       ),
     );
@@ -817,6 +956,21 @@ class _PilotCard extends StatelessWidget {
     if (days == 0) return 'SCADE OGGI';
     return 'SCADE TRA ${days}gg';
   }
+}
+
+class _MicroBadge extends StatelessWidget {
+  final String text;
+  final Color color;
+  const _MicroBadge(this.text, this.color);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      border: Border.all(color: color.withValues(alpha: 0.6)),
+      color: color.withValues(alpha: 0.1),
+    ),
+    child: Text(text, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+  );
 }
 
 class _IconBtn extends StatelessWidget {
