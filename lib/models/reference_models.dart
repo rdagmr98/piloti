@@ -1,0 +1,41 @@
+class AircraftType {
+  final int id;
+  final String code;
+  final String name;
+  final bool active;
+
+  const AircraftType({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.active = true,
+  });
+
+  factory AircraftType.fromJson(Map<String, dynamic> j) => AircraftType(
+    id: j['id'] as int,
+    code: j['code'] as String,
+    name: j['name'] as String,
+    active: j['active'] as bool? ?? true,
+  );
+}
+
+class CapabilityType {
+  final int id;
+  final String code;
+  final String name;
+  final int sortOrder;
+
+  const CapabilityType({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.sortOrder = 0,
+  });
+
+  factory CapabilityType.fromJson(Map<String, dynamic> j) => CapabilityType(
+    id: j['id'] as int,
+    code: j['code'] as String,
+    name: j['name'] as String,
+    sortOrder: j['sort_order'] as int? ?? 0,
+  );
+}
