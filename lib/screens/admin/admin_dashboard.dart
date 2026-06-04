@@ -139,23 +139,39 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
   Future<void> _addFlight() async {
     final auth = ref.read(authProvider);
     final aircraftTypes = auth.aircraftTypes;
+    final flightTypes   = auth.flightTypes;
     DateTime date = DateTime.now();
     int? selectedAircraftId = aircraftTypes.isEmpty ? null : aircraftTypes.first.id;
+    int? selectedFlightTypeId = flightTypes.isEmpty ? null : flightTypes.first.id;
     final durationCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     final selectedPilotIds = <String>{};
 
     // Eligibility helpers
+    String? requiredCap(int? ftId) {
+      if (ftId == null) return null;
+      try { return flightTypes.firstWhere((ft) => ft.id == ftId).requiredCapability; }
+      catch (_) { return null; }
+    }
+
     bool isQualified(UserProfile p) =>
         selectedAircraftId == null ||
         p.aircraftQualificationIds.contains(selectedAircraftId);
+
+    bool hasCapability(UserProfile p) {
+      final cap = requiredCap(selectedFlightTypeId);
+      if (cap == null) return true;
+      return _userService.getPilotCapabilityIds(p.id).any(
+        (id) => auth.capabilityTypes.any((ct) => '${ct.id}' == '$id' && ct.code == cap),
+      );
+    }
 
     bool isCurrent(UserProfile p) {
       final s = fitnessStatus(p.fitnessExpiry);
       return s == PilotStatus.go || s == PilotStatus.warning;
     }
 
-    bool isEligible(UserProfile p) => isQualified(p) && isCurrent(p);
+    bool isEligible(UserProfile p) => isQualified(p) && isCurrent(p) && hasCapability(p);
 
     await showDialog<void>(
       context: context,
@@ -180,6 +196,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                       await _flightService.insertFlight(
                         date: date,
                         aircraftTypeId: selectedAircraftId!,
+                        flightTypeId: selectedFlightTypeId,
                         pilotIds: selectedPilotIds.toList(),
                         durationMinutes: int.tryParse(durationCtrl.text),
                         notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
@@ -223,7 +240,6 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                       .toList(),
                   onChanged: (v) => set(() {
                     selectedAircraftId = v;
-                    // deselect pilots no longer eligible
                     selectedPilotIds.removeWhere((id) {
                       final p = _pilots.firstWhere((x) => x.id == id,
                           orElse: () => _pilots.first);
@@ -231,6 +247,39 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                     });
                   }),
                 ),
+                const SizedBox(height: 12),
+                _hudDropdown<int>(
+                  label: 'TIPO VOLO *',
+                  value: selectedFlightTypeId,
+                  items: flightTypes
+                      .map((ft) => DropdownMenuItem(
+                            value: ft.id,
+                            child: Text(ft.name, overflow: TextOverflow.ellipsis),
+                          ))
+                      .toList(),
+                  onChanged: (v) => set(() {
+                    selectedFlightTypeId = v;
+                    selectedPilotIds.removeWhere((id) {
+                      final p = _pilots.firstWhere((x) => x.id == id,
+                          orElse: () => _pilots.first);
+                      return !isEligible(p);
+                    });
+                  }),
+                ),
+                // Show required capability if any
+                Builder(builder: (_) {
+                  final cap = requiredCap(selectedFlightTypeId);
+                  if (cap == null) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(children: [
+                      const Icon(Icons.military_tech, color: kWarning, size: 14),
+                      const SizedBox(width: 6),
+                      Text('Richiede capacità: $cap',
+                          style: const TextStyle(color: kWarning, fontSize: 11)),
+                    ]),
+                  );
+                }),
                 const SizedBox(height: 12),
                 _hudTextField(durationCtrl, 'DURATA (MIN)', TextInputType.number),
                 const SizedBox(height: 12),
@@ -318,6 +367,8 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                             _MicroBadge('NON ABILITATO', kNoGo),
                           if (!current)
                             _MicroBadge('NON CURRENT', kWarning),
+                          if (qualified && current && !hasCapability(p))
+                            _MicroBadge('MANCA ${requiredCap(selectedFlightTypeId) ?? ''}', kWarning),
                         ]),
                       ),
                     );

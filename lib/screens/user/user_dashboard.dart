@@ -88,8 +88,10 @@ class _UserDashboardState extends ConsumerState<UserDashboard>
   Future<void> _addFlight() async {
     final auth = ref.read(authProvider);
     final aircraftTypes = auth.aircraftTypes;
+    final flightTypes   = auth.flightTypes;
     DateTime date = DateTime.now();
     int? selectedAircraftId = aircraftTypes.isEmpty ? null : aircraftTypes.first.id;
+    int? selectedFlightTypeId = flightTypes.isEmpty ? null : flightTypes.first.id;
     final durationCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
 
@@ -105,6 +107,7 @@ class _UserDashboardState extends ConsumerState<UserDashboard>
                   await _flightService.insertFlight(
                     date: date,
                     aircraftTypeId: selectedAircraftId!,
+                    flightTypeId: selectedFlightTypeId,
                     pilotIds: [auth.currentUser!.id],
                     durationMinutes: int.tryParse(durationCtrl.text),
                     notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
@@ -144,6 +147,21 @@ class _UserDashboardState extends ConsumerState<UserDashboard>
                     .map((a) => DropdownMenuItem(value: a.id, child: Text(a.code)))
                     .toList(),
                 onChanged: (v) => set(() => selectedAircraftId = v),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                value: selectedFlightTypeId,
+                dropdownColor: kBgCard,
+                isExpanded: true,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: _hudInputDecoration('TIPO VOLO'),
+                items: flightTypes
+                    .map((ft) => DropdownMenuItem(
+                          value: ft.id,
+                          child: Text(ft.name, overflow: TextOverflow.ellipsis),
+                        ))
+                    .toList(),
+                onChanged: (v) => set(() => selectedFlightTypeId = v),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -432,6 +450,11 @@ class _FlightRow extends StatelessWidget {
                   flight.aircraftCode.toUpperCase(),
                   style: const TextStyle(color: kCyan, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
+                if (flight.flightTypeCode.isNotEmpty)
+                  Text(
+                    flight.flightTypeCode,
+                    style: TextStyle(color: kCyan.withValues(alpha: 0.5), fontSize: 10, letterSpacing: 1),
+                  ),
                 if (flight.notes != null)
                   Text(
                     flight.notes!,

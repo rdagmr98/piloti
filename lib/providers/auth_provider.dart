@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/flight_models.dart';
 import '../models/reference_models.dart';
 import '../models/user_models.dart';
 import '../services/auth_service.dart';
@@ -17,6 +18,7 @@ class AuthProvider extends ChangeNotifier {
   List<AircraftType> _aircraftTypes = [];
   List<CapabilityType> _capabilityTypes = [];
   List<OrgUnit> _orgUnits = [];
+  List<FlightType> _flightTypes = [];
   bool _loading = false;
   bool _dbInitialized = false;
   String? _error;
@@ -25,6 +27,7 @@ class AuthProvider extends ChangeNotifier {
   List<AircraftType> get aircraftTypes => _aircraftTypes;
   List<CapabilityType> get capabilityTypes => _capabilityTypes;
   List<OrgUnit> get orgUnits => _orgUnits;
+  List<FlightType> get flightTypes => _flightTypes;
   bool get isLoading => _loading;
   bool get dbInitialized => _dbInitialized;
   String? get error => _error;
@@ -42,6 +45,7 @@ class AuthProvider extends ChangeNotifier {
     _aircraftTypes = _userService.getAircraftTypes();
     _capabilityTypes = _userService.getCapabilityTypes();
     _orgUnits = _userService.getOrgUnits();
+    _flightTypes = _userService.getFlightTypes();
   }
 
   Future<bool> login(String username, String password) async {

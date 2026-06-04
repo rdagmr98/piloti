@@ -56,3 +56,27 @@ class OrgUnit {
     name: j['name'] as String,
   );
 }
+
+class FlightType {
+  final int id;
+  final String code;
+  final String name;
+  final String? requiredCapability;
+  final int sortOrder;
+
+  const FlightType({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.requiredCapability,
+    this.sortOrder = 0,
+  });
+
+  factory FlightType.fromJson(Map<String, dynamic> j) => FlightType(
+    id: j['id'] as int,
+    code: j['code'] as String,
+    name: j['name'] as String,
+    requiredCapability: j['required_capability'] as String?,
+    sortOrder: j['sort_order'] as int? ?? 0,
+  );
+}

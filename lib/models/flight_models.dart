@@ -4,6 +4,9 @@ class FlightActivity {
   final int aircraftTypeId;
   final String aircraftCode;
   final String aircraftName;
+  final int? flightTypeId;
+  final String flightTypeCode;
+  final String flightTypeName;
   final int? durationMinutes;
   final List<String> pilotIds;
   final String? notes;
@@ -16,6 +19,9 @@ class FlightActivity {
     required this.aircraftTypeId,
     this.aircraftCode = '',
     this.aircraftName = '',
+    this.flightTypeId,
+    this.flightTypeCode = '',
+    this.flightTypeName = '',
     this.durationMinutes,
     required this.pilotIds,
     this.notes,
@@ -26,12 +32,16 @@ class FlightActivity {
   factory FlightActivity.fromJson(
     Map<String, dynamic> j,
     Map<String, dynamic>? aircraft,
+    Map<String, dynamic>? flightType,
   ) => FlightActivity(
     id: j['id'] as int,
     date: DateTime.parse(j['date'] as String),
     aircraftTypeId: j['aircraft_type_id'] as int,
     aircraftCode: aircraft?['code'] as String? ?? '',
     aircraftName: aircraft?['name'] as String? ?? '',
+    flightTypeId: j['flight_type_id'] as int?,
+    flightTypeCode: flightType?['code'] as String? ?? '',
+    flightTypeName: flightType?['name'] as String? ?? '',
     durationMinutes: j['duration_minutes'] as int?,
     pilotIds: List<String>.from(j['pilot_ids'] as List? ?? []),
     notes: j['notes'] as String?,
@@ -45,6 +55,7 @@ class FlightActivity {
     'id': id,
     'date': date.toIso8601String().split('T').first,
     'aircraft_type_id': aircraftTypeId,
+    'flight_type_id': flightTypeId,
     'duration_minutes': durationMinutes,
     'pilot_ids': pilotIds,
     'notes': notes,

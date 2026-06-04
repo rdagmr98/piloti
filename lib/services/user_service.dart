@@ -1,3 +1,4 @@
+import '../models/flight_models.dart';
 import '../models/reference_models.dart';
 import '../models/user_models.dart';
 import 'gh_db_service.dart';
@@ -60,6 +61,12 @@ class UserService {
   List<OrgUnit> getOrgUnits() {
     final items = _refList('orgUnits').map(OrgUnit.fromJson).toList();
     items.sort((a, b) => a.id.compareTo(b.id));
+    return items;
+  }
+
+  List<FlightType> getFlightTypes() {
+    final items = _refList('flightTypes').map(FlightType.fromJson).toList();
+    items.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
     return items;
   }
 
