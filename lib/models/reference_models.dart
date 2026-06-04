@@ -2,12 +2,14 @@ class AircraftType {
   final int id;
   final String code;
   final String name;
+  final String? image;
   final bool active;
 
   const AircraftType({
     required this.id,
     required this.code,
     required this.name,
+    this.image,
     this.active = true,
   });
 
@@ -15,6 +17,7 @@ class AircraftType {
     id: j['id'] as int,
     code: j['code'] as String,
     name: j['name'] as String,
+    image: j['image'] as String?,
     active: j['active'] as bool? ?? true,
   );
 }

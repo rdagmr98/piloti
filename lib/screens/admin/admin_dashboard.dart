@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import '../../models/flight_models.dart';
 import '../../models/user_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/flight_service.dart';
 import '../../services/user_service.dart';
+import '../../widgets/go_nogo_orb.dart';
+import '../../widgets/hud_painters.dart';
 
 class AdminDashboard extends ConsumerStatefulWidget {
   const AdminDashboard({super.key});
@@ -14,42 +15,58 @@ class AdminDashboard extends ConsumerStatefulWidget {
   ConsumerState<AdminDashboard> createState() => _AdminDashboardState();
 }
 
-class _AdminDashboardState extends ConsumerState<AdminDashboard> {
+class _AdminDashboardState extends ConsumerState<AdminDashboard>
+    with TickerProviderStateMixin {
   final _userService = UserService();
   final _flightService = FlightService();
   List<UserProfile> _pilots = [];
   bool _loading = true;
 
+  late AnimationController _scanCtrl;
+  late AnimationController _headerCtrl;
+
   @override
   void initState() {
     super.initState();
+    _scanCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat();
+    _headerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _scanCtrl.dispose();
+    _headerCtrl.dispose();
+    super.dispose();
   }
 
   void _load() {
     setState(() => _loading = true);
     _pilots = _userService.getAllUsers().where((u) => !u.isAdmin).toList();
+    _pilots.sort((a, b) {
+      final sa = fitnessStatus(a.fitnessExpiry);
+      final sb = fitnessStatus(b.fitnessExpiry);
+      final order = [PilotStatus.noGo, PilotStatus.warning, PilotStatus.noData, PilotStatus.go];
+      return order.indexOf(sa).compareTo(order.indexOf(sb));
+    });
     setState(() => _loading = false);
   }
 
   String _fmt(DateTime? d) =>
-      d == null ? '-' : DateFormat('dd/MM/yyyy').format(d);
+      d == null ? '---' : DateFormat('dd/MM/yyyy').format(d);
 
-  Color _expiryColor(DateTime? expiry) {
-    if (expiry == null) return Colors.grey;
+  String _countdown(DateTime? expiry) {
+    if (expiry == null) return 'N/D';
     final days = expiry.difference(DateTime.now()).inDays;
-    if (days < 0) return Colors.red;
-    if (days <= 60) return Colors.orange;
-    return Colors.green;
-  }
-
-  String _expiryStatus(DateTime? expiry) {
-    if (expiry == null) return 'Non impostata';
-    final days = expiry.difference(DateTime.now()).inDays;
-    if (days < 0) return 'Scaduta';
-    if (days == 0) return 'Scade oggi';
-    if (days <= 60) return 'In scadenza';
-    return 'Valida';
+    if (days < 0) return 'SCADUTO ${-days}gg fa';
+    if (days == 0) return 'SCADE OGGI';
+    return 'SCADE TRA ${days}gg';
   }
 
   Future<void> _editExpiry(UserProfile pilot) async {
@@ -58,6 +75,12 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
       initialDate: pilot.fitnessExpiry ?? DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime(2040),
+      builder: (ctx, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(primary: kCyan),
+        ),
+        child: child!,
+      ),
     );
     if (picked == null) return;
     await _userService.updateFitnessExpiry(pilot.id, picked);
@@ -68,33 +91,47 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     final flights = _flightService.getFlightsForPilot(pilot.id);
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Voli di ${pilot.fullName}'),
-        content: SizedBox(
-          width: 400,
-          child: flights.isEmpty
-              ? const Text('Nessun volo registrato.')
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: flights.length,
-                  itemBuilder: (_, i) {
-                    final f = flights[i];
-                    return ListTile(
-                      leading: const Icon(Icons.flight_takeoff),
-                      title: Text('${f.aircraftCode}  •  ${_fmt(f.date)}'),
-                      subtitle: f.durationMinutes != null
-                          ? Text('${f.durationMinutes} min')
-                          : null,
-                    );
-                  },
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Chiudi'),
-          ),
-        ],
+      builder: (ctx) => _HudDialog(
+        title: 'VOLI — ${pilot.fullName.toUpperCase()}',
+        child: flights.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Nessun volo registrato.',
+                    style: TextStyle(color: Colors.white54)),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: flights
+                    .take(20)
+                    .map(
+                      (f) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.flight_takeoff, color: kCyan, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              f.aircraftCode,
+                              style: const TextStyle(color: kCyan, fontSize: 13),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              _fmt(f.date),
+                              style: const TextStyle(color: Colors.white70, fontSize: 13),
+                            ),
+                            if (f.durationMinutes != null) ...[
+                              const SizedBox(width: 12),
+                              Text(
+                                '${f.durationMinutes}min',
+                                style: TextStyle(color: kCyan.withValues(alpha: 0.6), fontSize: 12),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
       ),
     );
   }
@@ -111,107 +148,81 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Inserisci volo'),
-          content: SizedBox(
-            width: 500,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_today),
-                    title: Text(DateFormat('dd/MM/yyyy').format(date)),
-                    onTap: () async {
-                      final d = await showDatePicker(
-                        context: ctx,
-                        initialDate: date,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2030),
-                      );
-                      if (d != null) setDialogState(() => date = d);
-                    },
-                  ),
-                  DropdownButtonFormField<int>(
-                    value: selectedAircraftId,
-                    decoration: const InputDecoration(labelText: 'Aeromobile'),
-                    items: aircraftTypes
-                        .map(
-                          (a) =>
-                              DropdownMenuItem(value: a.id, child: Text(a.code)),
-                        )
-                        .toList(),
-                    onChanged: (v) =>
-                        setDialogState(() => selectedAircraftId = v),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: durationCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Durata (minuti)',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: notesCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Note (opzionale)',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Piloti',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  ..._pilots.map(
-                    (p) => CheckboxListTile(
-                      dense: true,
-                      title: Text(p.fullName),
-                      value: selectedPilotIds.contains(p.id),
-                      onChanged: (v) => setDialogState(() {
-                        if (v == true) {
-                          selectedPilotIds.add(p.id);
-                        } else {
-                          selectedPilotIds.remove(p.id);
-                        }
-                      }),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        builder: (ctx, set) => _HudDialog(
+          title: 'INSERISCI VOLO',
+          action: FilledButton(
+            onPressed: selectedPilotIds.isEmpty || selectedAircraftId == null
+                ? null
+                : () async {
+                    Navigator.of(ctx).pop();
+                    await _flightService.insertFlight(
+                      date: date,
+                      aircraftTypeId: selectedAircraftId!,
+                      pilotIds: selectedPilotIds.toList(),
+                      durationMinutes: int.tryParse(durationCtrl.text),
+                      notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
+                      insertedByUserId: auth.currentUser!.id,
+                    );
+                    _load();
+                  },
+            style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+            child: const Text('SALVA', style: TextStyle(color: kCyan, letterSpacing: 2)),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Annulla'),
-            ),
-            FilledButton(
-              onPressed: selectedPilotIds.isEmpty || selectedAircraftId == null
-                  ? null
-                  : () async {
-                      Navigator.of(ctx).pop();
-                      await _flightService.insertFlight(
-                        date: date,
-                        aircraftTypeId: selectedAircraftId!,
-                        pilotIds: selectedPilotIds.toList(),
-                        durationMinutes: int.tryParse(durationCtrl.text),
-                        notes: notesCtrl.text.isEmpty ? null : notesCtrl.text,
-                        insertedByUserId: auth.currentUser!.id,
-                      );
-                      _load();
-                    },
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF5C6BC0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _HudTile(
+                label: 'DATA',
+                value: DateFormat('dd/MM/yyyy').format(date),
+                icon: Icons.calendar_today,
+                onTap: () async {
+                  final d = await showDatePicker(
+                    context: ctx,
+                    initialDate: date,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2030),
+                    builder: (ctx, child) => Theme(
+                      data: ThemeData.dark().copyWith(
+                        colorScheme: const ColorScheme.dark(primary: kCyan),
+                      ),
+                      child: child!,
+                    ),
+                  );
+                  if (d != null) set(() => date = d);
+                },
               ),
-              child: const Text('Salva'),
-            ),
-          ],
+              const SizedBox(height: 12),
+              _hudDropdown<int>(
+                label: 'AEROMOBILE',
+                value: selectedAircraftId,
+                items: aircraftTypes
+                    .map((a) => DropdownMenuItem(value: a.id, child: Text(a.code)))
+                    .toList(),
+                onChanged: (v) => set(() => selectedAircraftId = v),
+              ),
+              const SizedBox(height: 12),
+              _hudTextField(durationCtrl, 'DURATA (MIN)', TextInputType.number),
+              const SizedBox(height: 12),
+              _hudTextField(notesCtrl, 'NOTE', TextInputType.text),
+              const SizedBox(height: 16),
+              const Text('PILOTI', style: TextStyle(color: kCyan, letterSpacing: 2, fontSize: 11)),
+              const SizedBox(height: 8),
+              ..._pilots.map(
+                (p) => CheckboxListTile(
+                  dense: true,
+                  title: Text(p.fullName, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                  value: selectedPilotIds.contains(p.id),
+                  activeColor: kCyan,
+                  checkColor: kBg,
+                  onChanged: (v) => set(() {
+                    if (v == true) selectedPilotIds.add(p.id);
+                    else selectedPilotIds.remove(p.id);
+                  }),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -219,212 +230,498 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
 
   Future<void> _addPilot() async {
     final nomeCtrl = TextEditingController();
-    final cognomeCtrl = TextEditingController();
-    final usernameCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final emailCtrl = TextEditingController();
+    final cogCtrl = TextEditingController();
+    final usrCtrl = TextEditingController();
+    final pwdCtrl = TextEditingController();
+    final mailCtrl = TextEditingController();
 
     await showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nuovo pilota'),
-        content: SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: cognomeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Cognome *',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: nomeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome *',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: usernameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Username *',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Password *',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Email (opzionale)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-              ],
-            ),
-          ),
+      builder: (ctx) => _HudDialog(
+        title: 'NUOVO PILOTA',
+        action: FilledButton(
+          onPressed: () async {
+            if (nomeCtrl.text.isEmpty || cogCtrl.text.isEmpty ||
+                usrCtrl.text.isEmpty || pwdCtrl.text.isEmpty) return;
+            Navigator.of(ctx).pop();
+            await _userService.createUser(
+              nome: nomeCtrl.text.trim(),
+              cognome: cogCtrl.text.trim(),
+              username: usrCtrl.text.trim(),
+              password: pwdCtrl.text,
+              email: mailCtrl.text.isEmpty ? null : mailCtrl.text.trim(),
+            );
+            _load();
+          },
+          style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+          child: const Text('CREA', style: TextStyle(color: kCyan, letterSpacing: 2)),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Annulla'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (nomeCtrl.text.isEmpty ||
-                  cognomeCtrl.text.isEmpty ||
-                  usernameCtrl.text.isEmpty ||
-                  passCtrl.text.isEmpty) {
-                return;
-              }
-              Navigator.of(ctx).pop();
-              await _userService.createUser(
-                nome: nomeCtrl.text.trim(),
-                cognome: cognomeCtrl.text.trim(),
-                username: usernameCtrl.text.trim(),
-                password: passCtrl.text,
-                email: emailCtrl.text.isEmpty ? null : emailCtrl.text.trim(),
-              );
-              _load();
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF5C6BC0),
-            ),
-            child: const Text('Crea'),
-          ),
-        ],
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _hudTextField(cogCtrl, 'COGNOME *', TextInputType.text),
+            const SizedBox(height: 12),
+            _hudTextField(nomeCtrl, 'NOME *', TextInputType.text),
+            const SizedBox(height: 12),
+            _hudTextField(usrCtrl, 'USERNAME *', TextInputType.text),
+            const SizedBox(height: 12),
+            _hudTextField(pwdCtrl, 'PASSWORD *', TextInputType.visiblePassword),
+            const SizedBox(height: 12),
+            _hudTextField(mailCtrl, 'EMAIL', TextInputType.emailAddress),
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final goCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.go).length;
+    final noGoCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.noGo).length;
+    final warnCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.warning).length;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gestione Piloti'),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_outlined),
+      backgroundColor: kBg,
+      body: AnimatedBuilder(
+        animation: _scanCtrl,
+        builder: (_, child) => Stack(
+          children: [
+            Positioned.fill(
+              child: CustomPaint(painter: HudGridPainter(_scanCtrl.value)),
+            ),
+            child!,
+          ],
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              _buildHeader(goCount, noGoCount, warnCount),
+              // Pilot grid
+              Expanded(
+                child: _loading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: kCyan),
+                      )
+                    : _pilots.isEmpty
+                        ? Center(
+                            child: Text(
+                              'NESSUN PILOTA REGISTRATO',
+                              style: TextStyle(color: kCyan.withValues(alpha: 0.5), letterSpacing: 3),
+                            ),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: () async => _load(),
+                            color: kCyan,
+                            child: GridView.builder(
+                              padding: const EdgeInsets.all(16),
+                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 320,
+                                childAspectRatio: 1.6,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                              ),
+                              itemCount: _pilots.length,
+                              itemBuilder: (_, i) => _PilotCard(
+                                pilot: _pilots[i],
+                                onEditExpiry: () => _editExpiry(_pilots[i]),
+                                onShowFlights: () => _showFlights(_pilots[i]),
+                              ),
+                            ),
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: 'pilot',
             onPressed: _addPilot,
-            tooltip: 'Aggiungi pilota',
+            backgroundColor: kBgCard,
+            foregroundColor: kCyan,
+            shape: const RoundedRectangleBorder(),
+            mini: true,
+            child: const Icon(Icons.person_add_outlined),
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _load,
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await ref.read(authProvider).signOut();
-              if (context.mounted) context.go('/login');
-            },
+          const SizedBox(height: 8),
+          FloatingActionButton.extended(
+            heroTag: 'flight',
+            onPressed: _addFlight,
+            backgroundColor: kCyan.withValues(alpha: 0.15),
+            foregroundColor: kCyan,
+            shape: const RoundedRectangleBorder(
+              side: BorderSide(color: kCyan, width: 1),
+            ),
+            icon: const Icon(Icons.flight_takeoff),
+            label: const Text('INSERISCI VOLO', style: TextStyle(letterSpacing: 2)),
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async => _load(),
-              child: _pilots.isEmpty
-                  ? const Center(
-                      child: Text('Nessun pilota registrato.'),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: _pilots.length,
-                      itemBuilder: (_, i) {
-                        final p = _pilots[i];
-                        final color = _expiryColor(p.fitnessExpiry);
-                        return Card(
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: color.withValues(alpha: 0.2),
-                              child: Text(
-                                p.cognome.isNotEmpty
-                                    ? p.cognome[0].toUpperCase()
-                                    : '?',
-                                style: TextStyle(
-                                  color: color,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            title: Text(
-                              p.fullName,
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            subtitle: Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: color.withValues(alpha: 0.5),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    _expiryStatus(p.fitnessExpiry),
-                                    style: TextStyle(
-                                      color: color,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  p.fitnessExpiry != null
-                                      ? _fmt(p.fitnessExpiry)
-                                      : '',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.flight_takeoff, size: 20),
-                                  onPressed: () => _showFlights(p),
-                                  tooltip: 'Voli',
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.edit_calendar, size: 20),
-                                  onPressed: () => _editExpiry(p),
-                                  tooltip: 'Modifica scadenza',
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
+    );
+  }
+
+  Widget _buildHeader(int go, int noGo, int warn) {
+    return AnimatedBuilder(
+      animation: _headerCtrl,
+      builder: (_, __) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: kBgCard,
+          border: Border(
+            bottom: BorderSide(color: kCyan.withValues(alpha: 0.3)),
+          ),
+        ),
+        child: Row(
+          children: [
+            // Logo
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: Image.asset(
+                'assets/images/aves_logo.png',
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.flight, color: kCyan),
+              ),
             ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addFlight,
-        backgroundColor: const Color(0xFF5C6BC0),
-        icon: const Icon(Icons.add),
-        label: const Text('Inserisci volo'),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'SISTEMA PILOTI',
+                    style: TextStyle(
+                      color: kCyan,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 3,
+                      shadows: [Shadow(color: kCyan.withValues(alpha: 0.5), blurRadius: 8)],
+                    ),
+                  ),
+                  Text(
+                    'DASHBOARD OPERATIVA',
+                    style: TextStyle(color: kCyan.withValues(alpha: 0.4), fontSize: 9, letterSpacing: 2),
+                  ),
+                ],
+              ),
+            ),
+            // Stats
+            _StatChip(value: go.toString(), label: 'GO', color: kGo),
+            const SizedBox(width: 8),
+            _StatChip(value: warn.toString(), label: 'CAU', color: kWarning),
+            const SizedBox(width: 8),
+            _StatChip(value: noGo.toString(), label: 'N/G', color: kNoGo),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.refresh, size: 18),
+              color: kCyan.withValues(alpha: 0.6),
+              onPressed: _load,
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout, size: 18),
+              color: kCyan.withValues(alpha: 0.6),
+              onPressed: () async {
+                await ref.read(authProvider).signOut();
+                if (context.mounted) context.go('/login');
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color color;
+
+  const _StatChip({required this.value, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+        color: color.withValues(alpha: 0.08),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+          Text(label, style: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 8, letterSpacing: 1)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PilotCard extends StatelessWidget {
+  final UserProfile pilot;
+  final VoidCallback onEditExpiry;
+  final VoidCallback onShowFlights;
+
+  const _PilotCard({
+    required this.pilot,
+    required this.onEditExpiry,
+    required this.onShowFlights,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final status = fitnessStatus(pilot.fitnessExpiry);
+    final color = statusColor(status);
+    final label = statusLabel(status);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: kBgCard,
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: CustomPaint(
+        painter: HudCornerPainter(color: color, size: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Status orb
+              GoNoGoOrb(status: status, size: 56),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      pilot.cognome.toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        letterSpacing: 1,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      pilot.nome.toUpperCase(),
+                      style: TextStyle(color: kCyan.withValues(alpha: 0.7), fontSize: 11, letterSpacing: 1),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _countdown(pilot.fitnessExpiry),
+                      style: TextStyle(color: color, fontSize: 10, letterSpacing: 0.5),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.flight_takeoff, size: 16),
+                    color: kCyan.withValues(alpha: 0.6),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: onShowFlights,
+                    tooltip: 'Voli',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit_calendar, size: 16),
+                    color: kCyan.withValues(alpha: 0.6),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    onPressed: onEditExpiry,
+                    tooltip: 'Modifica scadenza',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _countdown(DateTime? expiry) {
+    if (expiry == null) return 'SCADENZA N/D';
+    final days = expiry.difference(DateTime.now()).inDays;
+    if (days < 0) return 'SCADUTO ${-days}gg FA';
+    if (days == 0) return 'SCADE OGGI';
+    return 'SCADE TRA ${days}gg';
+  }
+}
+
+// ── HUD-styled reusable dialog ───────────────────────────────────────────────
+
+class _HudDialog extends StatelessWidget {
+  final String title;
+  final Widget child;
+  final Widget? action;
+
+  const _HudDialog({required this.title, required this.child, this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 480, maxHeight: 600),
+        decoration: BoxDecoration(
+          color: kBgCard,
+          border: Border.all(color: kCyan.withValues(alpha: 0.4)),
+        ),
+        child: CustomPaint(
+          painter: HudCornerPainter(color: kCyan, size: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: kCyan.withValues(alpha: 0.3))),
+                ),
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: kCyan,
+                    letterSpacing: 3,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: child,
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: kCyan.withValues(alpha: 0.2))),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Text('ANNULLA', style: TextStyle(color: kCyan.withValues(alpha: 0.5), letterSpacing: 2)),
+                    ),
+                    if (action != null) ...[
+                      const SizedBox(width: 12),
+                      action!,
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── HUD reusable form widgets ────────────────────────────────────────────────
+
+Widget _hudTextField(TextEditingController ctrl, String label, TextInputType kbType) {
+  return TextField(
+    controller: ctrl,
+    keyboardType: kbType,
+    obscureText: kbType == TextInputType.visiblePassword,
+    style: const TextStyle(color: Colors.white),
+    decoration: InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: kCyan.withValues(alpha: 0.6), letterSpacing: 2, fontSize: 11),
+      enabledBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: kCyan.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.zero,
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderSide: BorderSide(color: kCyan),
+        borderRadius: BorderRadius.zero,
+      ),
+      filled: true,
+      fillColor: kCyan.withValues(alpha: 0.04),
+    ),
+  );
+}
+
+Widget _hudDropdown<T>({
+  required String label,
+  required T? value,
+  required List<DropdownMenuItem<T>> items,
+  required ValueChanged<T?> onChanged,
+}) {
+  return DropdownButtonFormField<T>(
+    value: value,
+    items: items,
+    onChanged: onChanged,
+    dropdownColor: kBgCard,
+    style: const TextStyle(color: Colors.white),
+    decoration: InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: kCyan.withValues(alpha: 0.6), letterSpacing: 2, fontSize: 11),
+      enabledBorder: OutlineInputBorder(
+        borderSide: BorderSide(color: kCyan.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.zero,
+      ),
+      focusedBorder: const OutlineInputBorder(
+        borderSide: BorderSide(color: kCyan),
+        borderRadius: BorderRadius.zero,
+      ),
+      filled: true,
+      fillColor: kCyan.withValues(alpha: 0.04),
+    ),
+  );
+}
+
+class _HudTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _HudTile({required this.label, required this.value, required this.icon, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: kCyan.withValues(alpha: 0.3)),
+          color: kCyan.withValues(alpha: 0.04),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: kCyan.withValues(alpha: 0.6)),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: kCyan.withValues(alpha: 0.5), fontSize: 10, letterSpacing: 2)),
+            const Spacer(),
+            Text(value, style: const TextStyle(color: Colors.white, fontSize: 13)),
+            if (onTap != null) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right, size: 14, color: kCyan.withValues(alpha: 0.4)),
+            ],
+          ],
+        ),
       ),
     );
   }

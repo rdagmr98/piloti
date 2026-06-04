@@ -24,29 +24,11 @@ class PilotiApp extends ConsumerWidget {
       title: 'Piloti',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        colorScheme: ColorScheme.dark(
-          primary: const Color(0xFF5C6BC0),
-          secondary: const Color(0xFF7986CB),
-          surface: const Color(0xFF1E1E2E),
-        ),
-        scaffoldBackgroundColor: const Color(0xFF12121A),
-        cardTheme: CardThemeData(
-          color: const Color(0xFF1E1E2E),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1A1A2E),
-          elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF2A2A3E),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF3A3A5E)),
-          ),
+        scaffoldBackgroundColor: const Color(0xFF060A14),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00CFFF),
+          secondary: Color(0xFF00FF88),
+          surface: Color(0xFF0C1628),
         ),
       ),
       routerConfig: _router,
