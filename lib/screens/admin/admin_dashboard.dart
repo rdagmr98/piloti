@@ -436,7 +436,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
   }
 }
 
-class _StatChip extends StatelessWidget {
+class _StatChip extends StatefulWidget {
   final String value;
   final String label;
   final Color color;
@@ -444,19 +444,78 @@ class _StatChip extends StatelessWidget {
   const _StatChip({required this.value, required this.label, required this.color});
 
   @override
+  State<_StatChip> createState() => _StatChipState();
+}
+
+class _StatChipState extends State<_StatChip>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-        color: color.withValues(alpha: 0.08),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
-          Text(label, style: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 8, letterSpacing: 1)),
-        ],
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: widget.color.withValues(alpha: 0.4 + 0.4 * _ctrl.value),
+            width: 1.5,
+          ),
+          color: widget.color.withValues(alpha: 0.06 + 0.06 * _ctrl.value),
+          boxShadow: [
+            BoxShadow(
+              color: widget.color.withValues(alpha: 0.1 + 0.15 * _ctrl.value),
+              blurRadius: 10,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.value,
+              style: TextStyle(
+                color: widget.color,
+                fontWeight: FontWeight.w900,
+                fontSize: 28,
+                height: 1,
+                shadows: [
+                  Shadow(
+                    color: widget.color.withValues(alpha: 0.6 + 0.4 * _ctrl.value),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              widget.label,
+              style: TextStyle(
+                color: widget.color.withValues(alpha: 0.8),
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 2,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
