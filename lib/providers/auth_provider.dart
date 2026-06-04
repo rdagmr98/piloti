@@ -16,22 +16,42 @@ class AuthProvider extends ChangeNotifier {
   UserProfile? _user;
   List<AircraftType> _aircraftTypes = [];
   List<CapabilityType> _capabilityTypes = [];
+  List<OrgUnit> _orgUnits = [];
   bool _loading = false;
+  bool _dbInitialized = false;
   String? _error;
 
   UserProfile? get currentUser => _user;
   List<AircraftType> get aircraftTypes => _aircraftTypes;
   List<CapabilityType> get capabilityTypes => _capabilityTypes;
+  List<OrgUnit> get orgUnits => _orgUnits;
   bool get isLoading => _loading;
+  bool get dbInitialized => _dbInitialized;
   String? get error => _error;
   bool get isLoggedIn => _user != null;
+
+  Future<void> initDb() async {
+    if (_dbInitialized) return;
+    await _db.init();
+    _refreshRefLists();
+    _dbInitialized = true;
+    notifyListeners();
+  }
+
+  void _refreshRefLists() {
+    _aircraftTypes = _userService.getAircraftTypes();
+    _capabilityTypes = _userService.getCapabilityTypes();
+    _orgUnits = _userService.getOrgUnits();
+  }
 
   Future<bool> login(String username, String password) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
-      await _db.init();
+      if (!_dbInitialized) await _db.init();
+      _refreshRefLists();
+      _dbInitialized = true;
       final user = await _auth.login(username, password);
       if (user == null) {
         _error = 'Credenziali non valide.';
@@ -39,9 +59,13 @@ class AuthProvider extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+      if (!user.isApproved && !user.isAdmin) {
+        _error = 'Account in attesa di approvazione.';
+        _loading = false;
+        notifyListeners();
+        return false;
+      }
       _user = user;
-      _aircraftTypes = _userService.getAircraftTypes();
-      _capabilityTypes = _userService.getCapabilityTypes();
       _loading = false;
       notifyListeners();
       return true;
@@ -64,8 +88,6 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> signOut() async {
     _user = null;
-    _aircraftTypes = [];
-    _capabilityTypes = [];
     notifyListeners();
   }
 }

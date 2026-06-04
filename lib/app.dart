@@ -4,12 +4,14 @@ import 'package:go_router/go_router.dart';
 import 'providers/auth_provider.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/register_screen.dart';
 import 'screens/user/user_dashboard.dart';
 
 final _router = GoRouter(
   initialLocation: '/login',
   routes: [
     GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+    GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
     GoRoute(path: '/user', builder: (_, __) => const UserDashboard()),
     GoRoute(path: '/admin', builder: (_, __) => const AdminDashboard()),
   ],

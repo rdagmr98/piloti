@@ -42,3 +42,17 @@ class CapabilityType {
     sortOrder: j['sort_order'] as int? ?? 0,
   );
 }
+
+class OrgUnit {
+  final int id;
+  final String code;
+  final String name;
+
+  const OrgUnit({required this.id, required this.code, required this.name});
+
+  factory OrgUnit.fromJson(Map<String, dynamic> j) => OrgUnit(
+    id: j['id'] as int,
+    code: j['code'] as String,
+    name: j['name'] as String,
+  );
+}

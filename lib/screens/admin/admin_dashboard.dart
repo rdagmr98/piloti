@@ -274,8 +274,76 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
     );
   }
 
+  Future<void> _manageCapabilities(UserProfile pilot) async {
+    final auth = ref.read(authProvider);
+    final allCaps = auth.capabilityTypes;
+    final currentIds = _userService.getPilotCapabilityIds(pilot.id).toSet();
+    final selected = Set<int>.from(currentIds);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => _HudDialog(
+          title: 'CAPACITÀ — ${pilot.displayName.toUpperCase()}',
+          action: FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await _userService.updatePilotCapabilities(pilot.id, selected.toList());
+              _load();
+            },
+            style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+            child: const Text('SALVA', style: TextStyle(color: kCyan, letterSpacing: 2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: allCaps.map((cap) => CheckboxListTile(
+              dense: true,
+              title: Text(cap.code, style: const TextStyle(color: kCyan, fontWeight: FontWeight.bold, fontSize: 13)),
+              subtitle: Text(cap.name, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+              value: selected.contains(cap.id),
+              activeColor: kCyan,
+              checkColor: kBg,
+              onChanged: (v) => set(() {
+                if (v == true) selected.add(cap.id);
+                else selected.remove(cap.id);
+              }),
+            )).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _approvePilot(UserProfile pilot) async {
+    await _userService.approveUser(pilot.id);
+    _load();
+  }
+
+  Future<void> _rejectPilot(UserProfile pilot) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _HudDialog(
+        title: 'RIFIUTA RICHIESTA',
+        action: FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          style: FilledButton.styleFrom(backgroundColor: kNoGo.withValues(alpha: 0.2)),
+          child: const Text('RIFIUTA', style: TextStyle(color: kNoGo, letterSpacing: 2)),
+        ),
+        child: Text(
+          'Rifiutare la richiesta di ${pilot.displayName}?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+      ),
+    );
+    if (confirmed == true) {
+      await _userService.rejectUser(pilot.id);
+      _load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final pending = _userService.getPendingPilots();
     final goCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.go).length;
     final noGoCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.noGo).length;
     final warnCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.warning).length;
@@ -313,20 +381,50 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                         : RefreshIndicator(
                             onRefresh: () async => _load(),
                             color: kCyan,
-                            child: GridView.builder(
+                            child: ListView(
                               padding: const EdgeInsets.all(16),
-                              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 320,
-                                childAspectRatio: 1.6,
-                                crossAxisSpacing: 12,
-                                mainAxisSpacing: 12,
-                              ),
-                              itemCount: _pilots.length,
-                              itemBuilder: (_, i) => _PilotCard(
-                                pilot: _pilots[i],
-                                onEditExpiry: () => _editExpiry(_pilots[i]),
-                                onShowFlights: () => _showFlights(_pilots[i]),
-                              ),
+                              children: [
+                                // Pending approvals
+                                if (pending.isNotEmpty) ...[
+                                  _SectionHeader(
+                                    label: 'IN ATTESA DI APPROVAZIONE',
+                                    count: pending.length,
+                                    color: kWarning,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ...pending.map((p) => _PendingCard(
+                                    pilot: p,
+                                    aircraftTypes: ref.read(authProvider).aircraftTypes,
+                                    onApprove: () => _approvePilot(p),
+                                    onReject: () => _rejectPilot(p),
+                                  )),
+                                  const SizedBox(height: 16),
+                                  Divider(color: kCyan.withValues(alpha: 0.15)),
+                                  const SizedBox(height: 16),
+                                ],
+                                // Active pilots grid
+                                if (_pilots.isNotEmpty) ...[
+                                  _SectionHeader(label: 'PILOTI ATTIVI', count: _pilots.length, color: kCyan),
+                                  const SizedBox(height: 8),
+                                  GridView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                                      maxCrossAxisExtent: 340,
+                                      childAspectRatio: 1.55,
+                                      crossAxisSpacing: 12,
+                                      mainAxisSpacing: 12,
+                                    ),
+                                    itemCount: _pilots.length,
+                                    itemBuilder: (_, i) => _PilotCard(
+                                      pilot: _pilots[i],
+                                      onEditExpiry: () => _editExpiry(_pilots[i]),
+                                      onShowFlights: () => _showFlights(_pilots[i]),
+                                      onCapabilities: () => _manageCapabilities(_pilots[i]),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
               ),
@@ -521,15 +619,125 @@ class _StatChipState extends State<_StatChip>
   }
 }
 
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+  const _SectionHeader({required this.label, required this.count, required this.color});
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(width: 3, height: 14, color: color),
+      const SizedBox(width: 8),
+      Text(label, style: TextStyle(color: color, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold)),
+      const SizedBox(width: 8),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.15), border: Border.all(color: color.withValues(alpha: 0.4))),
+        child: Text('$count', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+      ),
+    ],
+  );
+}
+
+class _PendingCard extends StatelessWidget {
+  final UserProfile pilot;
+  final List<dynamic> aircraftTypes;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+
+  const _PendingCard({
+    required this.pilot,
+    required this.aircraftTypes,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final qualCodes = aircraftTypes
+        .where((a) => pilot.aircraftQualificationIds.contains(a.id))
+        .map((a) => a.code as String)
+        .join(', ');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: kBgCard,
+        border: Border.all(color: kWarning.withValues(alpha: 0.4)),
+      ),
+      child: CustomPaint(
+        painter: HudCornerPainter(color: kWarning, size: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  pilot.callsign?.toUpperCase() ?? pilot.fullName.toUpperCase(),
+                  style: const TextStyle(color: kWarning, fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 1),
+                ),
+                const SizedBox(width: 8),
+                Text(pilot.fullName, style: TextStyle(color: Colors.white54, fontSize: 12)),
+                const Spacer(),
+                _ActionBtn(label: 'APPROVA', color: kGo, onTap: onApprove),
+                const SizedBox(width: 8),
+                _ActionBtn(label: 'RIFIUTA', color: kNoGo, onTap: onReject),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, children: [
+              if (pilot.orgUnitName.isNotEmpty)
+                _InfoTag(pilot.orgUnitName.split('"').length > 1
+                    ? '"${pilot.orgUnitName.split('"')[1]}"'
+                    : pilot.orgUnitName.split('-').first.trim()),
+              if (qualCodes.isNotEmpty) _InfoTag(qualCodes),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionBtn extends StatelessWidget {
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _ActionBtn({required this.label, required this.color, required this.onTap});
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(border: Border.all(color: color.withValues(alpha: 0.6)), color: color.withValues(alpha: 0.1)),
+      child: Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+    ),
+  );
+}
+
+class _InfoTag extends StatelessWidget {
+  final String text;
+  const _InfoTag(this.text);
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(border: Border.all(color: kCyan.withValues(alpha: 0.25)), color: kCyan.withValues(alpha: 0.05)),
+    child: Text(text, style: TextStyle(color: kCyan.withValues(alpha: 0.7), fontSize: 10), overflow: TextOverflow.ellipsis),
+  );
+}
+
 class _PilotCard extends StatelessWidget {
   final UserProfile pilot;
   final VoidCallback onEditExpiry;
   final VoidCallback onShowFlights;
+  final VoidCallback onCapabilities;
 
   const _PilotCard({
     required this.pilot,
     required this.onEditExpiry,
     required this.onShowFlights,
+    required this.onCapabilities,
   });
 
   @override
@@ -590,22 +798,9 @@ class _PilotCard extends StatelessWidget {
               Column(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.flight_takeoff, size: 16),
-                    color: kCyan.withValues(alpha: 0.6),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    onPressed: onShowFlights,
-                    tooltip: 'Voli',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.edit_calendar, size: 16),
-                    color: kCyan.withValues(alpha: 0.6),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                    onPressed: onEditExpiry,
-                    tooltip: 'Modifica scadenza',
-                  ),
+                  _IconBtn(Icons.flight_takeoff, onShowFlights, 'Voli'),
+                  _IconBtn(Icons.edit_calendar, onEditExpiry, 'Scadenza'),
+                  _IconBtn(Icons.military_tech, onCapabilities, 'Capacità'),
                 ],
               ),
             ],
@@ -622,6 +817,22 @@ class _PilotCard extends StatelessWidget {
     if (days == 0) return 'SCADE OGGI';
     return 'SCADE TRA ${days}gg';
   }
+}
+
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final String tooltip;
+  const _IconBtn(this.icon, this.onTap, this.tooltip);
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: Icon(icon, size: 16),
+    color: kCyan.withValues(alpha: 0.6),
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+    onPressed: onTap,
+    tooltip: tooltip,
+  );
 }
 
 // ── HUD-styled reusable dialog ───────────────────────────────────────────────

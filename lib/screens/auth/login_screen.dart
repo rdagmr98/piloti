@@ -244,7 +244,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => context.go('/register'),
+                      child: Text(
+                        'PRIMA VOLTA? REGISTRATI',
+                        style: TextStyle(
+                          color: kCyan.withValues(alpha: 0.55),
+                          fontSize: 11,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     // Status text
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
