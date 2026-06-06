@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../models/flight_models.dart';
 import '../../models/user_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/flight_service.dart';
@@ -20,6 +21,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
   final _userService = UserService();
   final _flightService = FlightService();
   List<UserProfile> _pilots = [];
+  Map<String, (double, double)> _pilotHours = {};
   bool _loading = true;
 
   late AnimationController _scanCtrl;
@@ -49,25 +51,59 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
   void _load() {
     setState(() => _loading = true);
     _pilots = _userService.getAllUsers().where((u) => !u.isAdmin).toList();
+
+    final allFlights = _flightService.getAllFlights();
+    _pilotHours = {};
+    for (final pilot in _pilots) {
+      final flights = allFlights.where((f) => f.pilotIds.contains(pilot.id)).toList();
+      _pilotHours[pilot.id] = _computeSemesterHours(flights);
+    }
+
     _pilots.sort((a, b) {
-      final sa = fitnessStatus(a.fitnessExpiry);
-      final sb = fitnessStatus(b.fitnessExpiry);
+      final sa = _pilotOverallStatus(a);
+      final sb = _pilotOverallStatus(b);
       final order = [PilotStatus.noGo, PilotStatus.warning, PilotStatus.noData, PilotStatus.go];
       return order.indexOf(sa).compareTo(order.indexOf(sb));
     });
     setState(() => _loading = false);
   }
 
+  (double, double) _computeSemesterHours(List<FlightActivity> flights) {
+    final now = DateTime.now();
+    final year = now.year;
+    final isH1 = now.month <= 6;
+    final curStart = isH1 ? DateTime(year, 1, 1) : DateTime(year, 7, 1);
+    final prevStart = isH1 ? DateTime(year - 1, 7, 1) : DateTime(year, 1, 1);
+    final prevEnd = isH1 ? DateTime(year - 1, 12, 31) : DateTime(year, 6, 30);
+
+    double sum(DateTime s, DateTime e) => flights
+        .where((f) => !f.date.isBefore(s) && !f.date.isAfter(e) && f.durationMinutes != null)
+        .fold(0.0, (acc, f) => acc + f.durationMinutes! / 60.0);
+
+    return (sum(curStart, now), sum(prevStart, prevEnd));
+  }
+
+  PilotStatus _pilotOverallStatus(UserProfile pilot) {
+    final fStatus = fitnessStatus(pilot.fitnessExpiry);
+    if (fStatus == PilotStatus.noGo) return PilotStatus.noGo;
+
+    final h = _pilotHours[pilot.id];
+    if (h == null) return fStatus;
+
+    final (curH, prevH) = h;
+
+    final now = DateTime.now();
+    final curSemStart = now.month <= 6 ? DateTime(now.year, 1, 1) : DateTime(now.year, 7, 1);
+    final isNewPilot = !pilot.createdAt.isBefore(curSemStart);
+
+    if (!isNewPilot && prevH < 6.0) return PilotStatus.noGo;
+    if (fStatus == PilotStatus.warning) return PilotStatus.warning;
+    if (curH < 6.0) return PilotStatus.warning;
+    return PilotStatus.go;
+  }
+
   String _fmt(DateTime? d) =>
       d == null ? '---' : DateFormat('dd/MM/yyyy').format(d);
-
-  String _countdown(DateTime? expiry) {
-    if (expiry == null) return 'N/D';
-    final days = expiry.difference(DateTime.now()).inDays;
-    if (days < 0) return 'SCADUTO ${-days}gg fa';
-    if (days == 0) return 'SCADE OGGI';
-    return 'SCADE TRA ${days}gg';
-  }
 
   Future<void> _editExpiry(UserProfile pilot) async {
     final picked = await showDatePicker(
@@ -167,7 +203,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
     }
 
     bool isCurrent(UserProfile p) {
-      final s = fitnessStatus(p.fitnessExpiry);
+      final s = _pilotOverallStatus(p);
       return s == PilotStatus.go || s == PilotStatus.warning;
     }
 
@@ -306,7 +342,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                   )
                 else
                   ...eligiblePilots.map((p) {
-                    final status = fitnessStatus(p.fitnessExpiry);
+                    final status = _pilotOverallStatus(p);
                     final color  = statusColor(status);
                     return CheckboxListTile(
                       dense: true,
@@ -504,6 +540,108 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
     );
   }
 
+  Future<void> _editPilot(UserProfile pilot) async {
+    final auth = ref.read(authProvider);
+    final aircraftTypes = auth.aircraftTypes;
+    final nomeCtrl = TextEditingController(text: pilot.nome);
+    final cogCtrl = TextEditingController(text: pilot.cognome);
+    final callsignCtrl = TextEditingController(text: pilot.callsign ?? '');
+    final mailCtrl = TextEditingController(text: pilot.email ?? '');
+    final pwdCtrl = TextEditingController();
+    final selectedAc = Set<int>.from(pilot.aircraftQualificationIds);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, set) => _HudDialog(
+          title: 'MODIFICA — ${pilot.displayName.toUpperCase()}',
+          action: FilledButton(
+            onPressed: () async {
+              if (cogCtrl.text.trim().isEmpty || nomeCtrl.text.trim().isEmpty) return;
+              Navigator.of(ctx).pop();
+              final updated = pilot.copyWith(
+                nome: nomeCtrl.text.trim(),
+                cognome: cogCtrl.text.trim(),
+                callsign: callsignCtrl.text.trim().isEmpty ? null : callsignCtrl.text.trim(),
+                email: mailCtrl.text.trim().isEmpty ? null : mailCtrl.text.trim(),
+                aircraftQualificationIds: selectedAc.toList(),
+              );
+              await _userService.updateUser(updated);
+              if (pwdCtrl.text.isNotEmpty) {
+                await _userService.updatePassword(pilot.id, pwdCtrl.text);
+              }
+              _load();
+            },
+            style: FilledButton.styleFrom(backgroundColor: kCyan.withValues(alpha: 0.2)),
+            child: const Text('SALVA', style: TextStyle(color: kCyan, letterSpacing: 2)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _hudTextField(cogCtrl, 'COGNOME *', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(nomeCtrl, 'NOME *', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(callsignCtrl, 'CALLSIGN', TextInputType.text),
+              const SizedBox(height: 12),
+              _hudTextField(mailCtrl, 'EMAIL', TextInputType.emailAddress),
+              const SizedBox(height: 12),
+              _hudTextField(pwdCtrl, 'NUOVA PASSWORD (opzionale)', TextInputType.visiblePassword),
+              const SizedBox(height: 16),
+              Row(children: [
+                Container(width: 3, height: 12, color: kCyan),
+                const SizedBox(width: 6),
+                Text(
+                  'AEROMOBILI ABILITATO',
+                  style: TextStyle(color: kCyan, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              ...aircraftTypes.map((a) => CheckboxListTile(
+                dense: true,
+                title: Row(children: [
+                  Text(a.code, style: const TextStyle(color: kCyan, fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  Flexible(child: Text(a.name, style: const TextStyle(color: Colors.white38, fontSize: 11), overflow: TextOverflow.ellipsis)),
+                ]),
+                value: selectedAc.contains(a.id),
+                activeColor: kCyan,
+                checkColor: kBg,
+                onChanged: (v) => set(() {
+                  if (v == true) selectedAc.add(a.id);
+                  else selectedAc.remove(a.id);
+                }),
+              )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deletePilot(UserProfile pilot) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _HudDialog(
+        title: 'ELIMINA PILOTA',
+        action: FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          style: FilledButton.styleFrom(backgroundColor: kNoGo.withValues(alpha: 0.2)),
+          child: const Text('ELIMINA', style: TextStyle(color: kNoGo, letterSpacing: 2)),
+        ),
+        child: Text(
+          'Eliminare definitivamente ${pilot.displayName}?\nQuesta azione non è reversibile.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+      ),
+    );
+    if (confirmed == true) {
+      await _userService.deleteUser(pilot.id);
+      _load();
+    }
+  }
+
   Future<void> _approvePilot(UserProfile pilot) async {
     await _userService.approveUser(pilot.id);
     _load();
@@ -534,9 +672,9 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
   @override
   Widget build(BuildContext context) {
     final pending = _userService.getPendingPilots();
-    final goCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.go).length;
-    final noGoCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.noGo).length;
-    final warnCount = _pilots.where((p) => fitnessStatus(p.fitnessExpiry) == PilotStatus.warning).length;
+    final goCount = _pilots.where((p) => _pilotOverallStatus(p) == PilotStatus.go).length;
+    final noGoCount = _pilots.where((p) => _pilotOverallStatus(p) == PilotStatus.noGo).length;
+    final warnCount = _pilots.where((p) => _pilotOverallStatus(p) == PilotStatus.warning).length;
 
     return Scaffold(
       backgroundColor: kBg,
@@ -601,16 +739,21 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard>
                                     physics: const NeverScrollableScrollPhysics(),
                                     gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                                       maxCrossAxisExtent: 340,
-                                      childAspectRatio: 1.55,
+                                      childAspectRatio: 1.3,
                                       crossAxisSpacing: 12,
                                       mainAxisSpacing: 12,
                                     ),
                                     itemCount: _pilots.length,
                                     itemBuilder: (_, i) => _PilotCard(
                                       pilot: _pilots[i],
+                                      overallStatus: _pilotOverallStatus(_pilots[i]),
+                                      currentSemHours: _pilotHours[_pilots[i].id]?.$1 ?? 0.0,
+                                      prevSemHours: _pilotHours[_pilots[i].id]?.$2 ?? 0.0,
                                       onEditExpiry: () => _editExpiry(_pilots[i]),
                                       onShowFlights: () => _showFlights(_pilots[i]),
                                       onCapabilities: () => _manageCapabilities(_pilots[i]),
+                                      onEditPilot: () => _editPilot(_pilots[i]),
+                                      onDeletePilot: () => _deletePilot(_pilots[i]),
                                     ),
                                   ),
                                 ],
@@ -919,22 +1062,30 @@ class _InfoTag extends StatelessWidget {
 
 class _PilotCard extends StatelessWidget {
   final UserProfile pilot;
+  final PilotStatus overallStatus;
+  final double currentSemHours;
+  final double prevSemHours;
   final VoidCallback onEditExpiry;
   final VoidCallback onShowFlights;
   final VoidCallback onCapabilities;
+  final VoidCallback onEditPilot;
+  final VoidCallback onDeletePilot;
 
   const _PilotCard({
     required this.pilot,
+    required this.overallStatus,
+    required this.currentSemHours,
+    required this.prevSemHours,
     required this.onEditExpiry,
     required this.onShowFlights,
     required this.onCapabilities,
+    required this.onEditPilot,
+    required this.onDeletePilot,
   });
 
   @override
   Widget build(BuildContext context) {
-    final status = fitnessStatus(pilot.fitnessExpiry);
-    final color = statusColor(status);
-    final label = statusLabel(status);
+    final color = statusColor(overallStatus);
 
     return Container(
       decoration: BoxDecoration(
@@ -954,9 +1105,8 @@ class _PilotCard extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Status orb
-              GoNoGoOrb(status: status, size: 56),
-              const SizedBox(width: 12),
+              GoNoGoOrb(status: overallStatus, size: 52),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -967,7 +1117,7 @@ class _PilotCard extends StatelessWidget {
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontSize: 13,
                         letterSpacing: 1,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -977,10 +1127,18 @@ class _PilotCard extends StatelessWidget {
                       style: TextStyle(color: kCyan.withValues(alpha: 0.7), fontSize: 11, letterSpacing: 1),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       _countdown(pilot.fitnessExpiry),
-                      style: TextStyle(color: color, fontSize: 10, letterSpacing: 0.5),
+                      style: TextStyle(color: color, fontSize: 9, letterSpacing: 0.5),
+                    ),
+                    Text(
+                      'SEM: ${currentSemHours.toStringAsFixed(1)}h  PREV: ${prevSemHours.toStringAsFixed(1)}h',
+                      style: TextStyle(
+                        color: prevSemHours < 6.0 ? kNoGo : currentSemHours < 6.0 ? kWarning : Colors.white38,
+                        fontSize: 9,
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ],
                 ),
@@ -991,6 +1149,8 @@ class _PilotCard extends StatelessWidget {
                   _IconBtn(Icons.flight_takeoff, onShowFlights, 'Voli'),
                   _IconBtn(Icons.edit_calendar, onEditExpiry, 'Scadenza'),
                   _IconBtn(Icons.military_tech, onCapabilities, 'Capacità'),
+                  _IconBtn(Icons.edit_outlined, onEditPilot, 'Modifica'),
+                  _IconBtn(Icons.delete_outline, onDeletePilot, 'Elimina', iconColor: kNoGo),
                 ],
               ),
             ],
@@ -1028,13 +1188,14 @@ class _IconBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String tooltip;
-  const _IconBtn(this.icon, this.onTap, this.tooltip);
+  final Color? iconColor;
+  const _IconBtn(this.icon, this.onTap, this.tooltip, {this.iconColor});
   @override
   Widget build(BuildContext context) => IconButton(
     icon: Icon(icon, size: 16),
-    color: kCyan.withValues(alpha: 0.6),
+    color: iconColor ?? kCyan.withValues(alpha: 0.6),
     padding: EdgeInsets.zero,
-    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+    constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
     onPressed: onTap,
     tooltip: tooltip,
   );

@@ -22,27 +22,6 @@ class AircraftType {
   );
 }
 
-class CapabilityType {
-  final int id;
-  final String code;
-  final String name;
-  final int sortOrder;
-
-  const CapabilityType({
-    required this.id,
-    required this.code,
-    required this.name,
-    this.sortOrder = 0,
-  });
-
-  factory CapabilityType.fromJson(Map<String, dynamic> j) => CapabilityType(
-    id: j['id'] as int,
-    code: j['code'] as String,
-    name: j['name'] as String,
-    sortOrder: j['sort_order'] as int? ?? 0,
-  );
-}
-
 class OrgUnit {
   final int id;
   final String code;
@@ -61,6 +40,7 @@ class FlightType {
   final int id;
   final String code;
   final String name;
+  final List<String> maintainsCapacities;
   final String? requiredCapability;
   final int sortOrder;
 
@@ -68,6 +48,7 @@ class FlightType {
     required this.id,
     required this.code,
     required this.name,
+    this.maintainsCapacities = const [],
     this.requiredCapability,
     this.sortOrder = 0,
   });
@@ -76,7 +57,32 @@ class FlightType {
     id: j['id'] as int,
     code: j['code'] as String,
     name: j['name'] as String,
+    maintainsCapacities: List<String>.from(j['maintains'] as List? ?? []),
     requiredCapability: j['required_capability'] as String?,
+    sortOrder: j['sort_order'] as int? ?? 0,
+  );
+}
+
+class CapabilityType {
+  final int id;
+  final String code;
+  final String name;
+  final bool isBase;
+  final int sortOrder;
+
+  const CapabilityType({
+    required this.id,
+    required this.code,
+    required this.name,
+    this.isBase = false,
+    this.sortOrder = 0,
+  });
+
+  factory CapabilityType.fromJson(Map<String, dynamic> j) => CapabilityType(
+    id: j['id'] as int,
+    code: j['code'] as String,
+    name: j['name'] as String,
+    isBase: j['is_base'] as bool? ?? false,
     sortOrder: j['sort_order'] as int? ?? 0,
   );
 }

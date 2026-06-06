@@ -1,4 +1,3 @@
-import '../models/flight_models.dart';
 import '../models/reference_models.dart';
 import '../models/user_models.dart';
 import 'gh_db_service.dart';
@@ -214,5 +213,24 @@ class UserService {
       'updated_at': DateTime.now().toIso8601String(),
     };
     await _db.saveUsers(users);
+  }
+
+  Future<void> updatePassword(String userId, String newPassword) async {
+    final users = _db.users.toList();
+    final idx = users.indexWhere((u) => u['id'] == userId);
+    if (idx < 0) return;
+    users[idx] = {
+      ...users[idx],
+      'password_hash': GhDbService.hashPassword(newPassword),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    await _db.saveUsers(users);
+  }
+
+  Future<void> deleteUser(String userId) async {
+    final users = _db.users.where((u) => u['id'] != userId).toList();
+    await _db.saveUsers(users);
+    final caps = _db.capabilities.where((c) => c['user_id'] != userId).toList();
+    await _db.saveCapabilities(caps);
   }
 }
